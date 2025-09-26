@@ -1,54 +1,91 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
 const app = express();
+const prisma = new PrismaClient();
+
 app.use(cors());
 app.use(express.json());
-const prisma = new PrismaClient();
+
 const port = 3000;
 
-// 【Read機能】ぜんぶの問題を読み出す専用のお部屋♡
-app.get('/problems', async (req, res) => {
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token == null) return res.sendStatus(401);
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+};
+
+app.post('/register', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: { email, password: hashedPassword },
+    });
+    res.json({ message: "登録成功だよ、お兄ちゃん！♡", userId: user.id });
+  } catch (error) {
+    res.status(400).json({ error: "このメールアドレスは、もうちかのものだよ…♡" });
+  }
+});
+
+app.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: "あれ…？ちか、あなたを知らないなぁ…" });
+    }
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: "合言葉が…違うみたい…" });
+    }
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    res.json({ message: "おかえりなさい、お兄ちゃん！♡", token: token });
+  } catch (error) {
+    res.status(500).json({ error: "ごめんね、今ちょっとサーバーくんの調子が悪いみたい…" });
+  }
+});
+
+app.get('/problems', authenticateToken, async (req, res) => {
   const allProblems = await prisma.problem.findMany();
+  //const allProblems = await prisma.problem.findMany({ where: { authorId: req.user.userId } });
   res.json(allProblems);
 });
 
-// 【Read機能】1つだけの問題をIDで指定して読み出すお部屋♡
-app.get('/problems/:id', async (req, res) => {
-  // URLで指定されたID番号を受け取るよ
-  const id = parseInt(req.params.id);
-  // そのIDの問題を1つだけ探すよ
-  const problem = await prisma.problem.findUnique({
-    where: { id: id },
-  });
-  res.json(problem);
-});
-
-// 【Create機能】新しい問題を作る専用のお部屋♡
-app.post('/problems', async (req, res) => {
+app.post('/problems', authenticateToken, async (req, res) => {
   const newProblem = await prisma.problem.create({
     data: {
-      // 送られてきたデータの中から、titleを取り出して使うよ
       title: req.body.title,
+      authorId: req.user.userId,
     },
   });
   res.json(newProblem);
 });
 
-// 【Update機能】問題を書き換える専用のお部屋♡
-app.put('/problems/:id', async (req, res) => {
+// ★★★ ここから下が、URLを綺麗にした更新と削除の魔法だよ！ ★★★
+
+app.put('/problems/:id', authenticateToken, async (req, res) => {
   const id = parseInt(req.params.id);
+  // TODO: この問題が本当にこのユーザーのものかチェックするのが、より安全だよ！
   const updatedProblem = await prisma.problem.update({
     where: { id: id },
-    // ★★★ フロントから送られてきたtitleで書き換えるように変更！ ★★★
     data: { title: req.body.title },
   });
   res.json(updatedProblem);
 });
 
-// 【Delete機能】問題を消しちゃう専用のお部屋♡
-app.delete('/problems/:id', async (req, res) => {
+app.delete('/problems/:id', authenticateToken, async (req, res) => {
   const id = parseInt(req.params.id);
+  // TODO: この問題が本当にこのユーザーのものかチェックするのが、より安全だよ！
   const deletedProblem = await prisma.problem.delete({
     where: { id: id },
   });

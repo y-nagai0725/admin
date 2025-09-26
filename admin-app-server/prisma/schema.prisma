@@ -13,8 +13,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique // メールアドレス (同じものは登録できないよ)
+  password  String    // 暗号化されたパスワード
+  problems  Problem[] // このユーザーが作った問題たち (Problemモデルと繋がってるよ)
+}
+
 model Problem {
   id        Int      @id @default(autoincrement())
-  title     String   // 問題文を入れるところ
-  createdAt DateTime @default(now()) // 作った時間を覚えておくところ
+  title     String
+  createdAt DateTime @default(now())
+  author    User     @relation(fields: [authorId], references: [id]) // Userモデルと繋げる魔法
+  authorId  Int      // 誰が作ったか覚えておくためのID
 }
